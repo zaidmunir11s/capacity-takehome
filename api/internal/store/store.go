@@ -46,11 +46,12 @@ type Request struct {
 }
 
 type Store struct {
-	Client   *mongo.Client
-	DB       *mongo.Database
-	Users    *mongo.Collection
-	Contacts *mongo.Collection
-	Requests *mongo.Collection
+	Client    *mongo.Client
+	DB        *mongo.Database
+	Users     *mongo.Collection
+	Contacts  *mongo.Collection
+	Requests  *mongo.Collection
+	UserSeats *mongo.Collection
 }
 
 func Connect(ctx context.Context, uri string) (*Store, error) {
@@ -63,11 +64,12 @@ func Connect(ctx context.Context, uri string) (*Store, error) {
 	}
 	db := client.Database("capacity")
 	s := &Store{
-		Client:   client,
-		DB:       db,
-		Users:    db.Collection("users"),
-		Contacts: db.Collection("contacts"),
-		Requests: db.Collection("requests"),
+		Client:    client,
+		DB:        db,
+		Users:     db.Collection("users"),
+		Contacts:  db.Collection("contacts"),
+		Requests:  db.Collection("requests"),
+		UserSeats: db.Collection("userSeats"),
 	}
 	return s, s.ensureIndexes(ctx)
 }
