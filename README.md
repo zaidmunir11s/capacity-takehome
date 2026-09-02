@@ -1,25 +1,6 @@
-# The Capacity Problem
+# Capacity Take-Home
 
-> ## ⚠️ READ THIS FIRST: the transcript is part of the deliverable
->
-> **You must hand in the transcript of your AI agent sessions.** Committed to
-> the repo, in `transcripts/`, linked from your README. See
-> [Hand in](#hand-in).
->
-> **No transcript is a deal breaker.** Not a smaller score. We close the tab,
-> whatever the code looks like. This is the one rule with no judgement call in
-> it, and it is the most common way people fail this exercise.
-
-Build a small social app where the contact list has a hard ceiling. The features
-are simple. The rules underneath them are not — that's the exercise.
-
-**4 hours.** Use AI agents freely; we do, and you hand in the transcript. It
-ends with a 45-minute call where you demo it and make one live change.
-
-Four hours will not comfortably fit everything below, and it isn't meant to.
-What you choose to build first, and what you consciously drop, is part of what
-we're reading. R1–R6 is the core; R7 and R8 exist for the unlikely case you're
-early. Say in your README what you left and why.
+A contact-list app with tiered capacity limits. GraphQL API (Go + MongoDB) and Expo mobile client.
 
 ## Run it
 
@@ -29,7 +10,7 @@ Needs Go 1.25+, Node 20+, Docker.
 make up        # mongo on :27117 (replica set, so transactions work)
 make api       # graphql on :8080, seeds ten users on first boot
 make mobile    # expo — press i for the iOS simulator, w for web
-make check     # go build + vet + test, and tsc on the client. green on clone
+make check     # go build + vet + test, and tsc on the client
 ```
 
 Playground at <http://localhost:8080>. Confirm it's alive:
@@ -39,151 +20,69 @@ curl -s localhost:8080/query -H 'Content-Type: application/json' \
   -d '{"query":"{ users { id name } }"}'
 ```
 
-Copy any `id` and send it as the `X-User-Id` header. That's the whole
-authentication story and it's intentionally fake.
+Copy any `id` and send it as the `X-User-Id` header. That's the whole authentication story.
 
-## Stack
-
-| | |
-|---|---|
-| API | Go 1.25 · GraphQL (gqlgen) · MongoDB 8 |
-| Client | Expo SDK 57 · React Native · TypeScript |
-| Local | Docker |
-
-Never written Go or shipped an Expo app? Not a disqualifier — getting productive
-in an unfamiliar stack inside a day is part of what we're measuring. If mobile
-genuinely blocks you, a web client is fine; say so.
+On a physical device set `EXPO_PUBLIC_API_URL=http://<your-lan-ip>:8080/query`.
 
 ## Tiers
 
 | Tier | Cap |
 |---|---|
-| Pink flag | 1 |
-| Blue flag | 3 |
-| Green flag | 5 |
+| Pink | 1 |
+| Blue | 3 |
+| Green | 5 |
 | **Shared budget** | **8** |
 
-Sub-caps sum to 9. The budget is 8. That gap is deliberate.
+Caps are env vars (`CAP_BUDGET`, `CAP_PINK`, `CAP_BLUE`, `CAP_GREEN`).
 
-## Build
+## What was built
 
-| | | |
-|---|---|---|
-| **R1** | Send a request to a named tier. | core |
-| **R2** | Accept / decline. Accept creates the contact on both sides. | core |
-| **R3** | Move a contact between tiers. | core |
-| **R4** | Remove a contact. Frees the seat on both sides. | core |
-| **R5** | People screen: contacts by tier, live `used / cap`, budget visible. | core |
-| **R6** | Request inbox. A failed accept says *why*, in plain words. | core |
-| **R7** | Posts scoped to a tier and everything closer. | stretch |
-| **R8** | Optimistic accept with rollback. | stretch |
+| Req | Feature |
+|---|---|
+| R1 | Send request to a named tier |
+| R2 | Accept / decline (bilateral contacts on accept) |
+| R3 | Move contact between tiers |
+| R4 | Remove contact (frees both sides) |
+| R5 | Mobile: contacts by tier, live used/cap, budget |
+| R6 | Mobile: request inbox; failed accept shows plain error |
 
-**Out of scope, don't spend time here:** auth, signup, profiles, search, push,
-deployment, visual polish.
+R7 (posts) and R8 (optimistic accept) were not implemented — stretch goals, deprioritized for time.
 
-## The four rules
+## Tests
 
-Most of the grade is here, not in the screens.
+Rule tests live in `api/internal/capacity/capacity_test.go` (Rules 1–3, over-cap) and `api/internal/store/race_test.go` (Rule 4 concurrency). Store integration tests in `api/internal/store/operations_test.go`.
 
-**1. Budget before sub-cap.** 3 Blue + 5 Green is 8 of 8. That person cannot add
-a Pink flag, even though Pink is empty. The sum is checked first.
-
-**2. A pending request holds no seat.** Sending creates no contact. One free
-seat buys unlimited outstanding requests. Capacity is checked at **accept**,
-against **both** people — either side being full fails it.
-
-**3. Re-filing is not adding.** Moving Green → Blue checks the destination
-sub-cap only, never the budget. The contact is already inside the budget; a
-budget check here blocks a legal move.
-
-**4. Two people can want the last seat.** Concurrent accepts on one free seat:
-exactly one wins, the other fails cleanly. Read-then-write is not an answer.
-
-Also: `used` may legally exceed `cap` (a lowered cap, a merge). Fail closed,
-don't panic. And caps are config, not constants — already done for you in
-`api/internal/config`. Don't undo it.
-
-## Where to start
-
-`api/internal/capacity/capacity.go` — three functions returning
-`errNotImplemented`, and a test file with five `t.Skip`ed tests named after the
-rules they should prove. Delete a Skip, write the test, make it pass. Rule 4
-needs a real database, so its stub is in `api/internal/store/race_test.go`.
-
-Then work outwards: resolvers in `api/graph/schema.resolvers.go` (`me` and
-`users` work, the rest panic), screens in `mobile/`.
-
-```
-api/graph/schema.graphqls      the API surface. edit it, then `make generate`
-api/internal/capacity/         THE GRADED SURFACE. pure rules, no IO
-api/internal/store/            mongo: documents, connection, indexes, seed
-mobile/App.tsx                 a user switcher, so you can act as anyone. replace it
+```bash
+make up
+make check
 ```
 
-Worth knowing: Mongo is on **27117**, not 27017, so it can't collide with one
-you already run. Caps are env vars — try `CAP_GREEN=500 make api`, nothing
-should need recompiling. On a physical device set
-`EXPO_PUBLIC_API_URL=http://<your-lan-ip>:8080/query`.
+## Decisions
 
-## Hand in
+1. **Pure `capacity` package + atomic `userSeats` in store.** Tier/budget decisions live in `capacity.CanSend` / `CanAdd` / `CanMove` (pure, unit-tested). Enforcement at accept time uses conditional `findOneAndUpdate` on a per-user `userSeats` document so concurrent accepts cannot overshoot the budget. Rejected: read `CountsFor` → `CanAdd` → insert (fails Rule 4).
 
-Two things get handed in: **the code, and the transcript.** A repo with only the
-code is half a submission.
+2. **Single-screen mobile app.** Extended `App.tsx` in place with sections for capacity, contacts by tier, inbox, and send form. Rejected: React Navigation or multiple screens — unnecessary for demo scope.
 
-Replace this README with your own. Keep run instructions, and add:
+3. **`CanSend` checks budget only.** Pending requests hold no seat; send is blocked when the sender has zero free budget seats (`total >= budget`). Tier sub-caps are enforced at accept via `CanAdd`. Rejected: checking tier caps at send time (would block legal pending requests).
 
-- **Decisions** — 3 or 4 calls you made and what you rejected. We read this first.
-- **What's next, and what's unfinished.** Unfinished with a reason beats hand-waved.
-- **Your agent transcript.** Required. Details below.
-- **Where the agent got it wrong** — one thing your AI tooling got confidently
-  wrong and how you caught it. Can't name one? We'll assume you didn't check.
-- Tests for the rules.
+4. **Bilateral sync in store transactions.** Accept, move, and remove always update both contact rows and both users' seat counters in one transaction. Rejected: updating only the caller's row.
 
-### The agent transcript (required)
+## What's unfinished
 
-Commit the full transcript of every AI session you used on this exercise, and
-link it from your README under a heading called **Agent transcript**.
+- **R7 posts** — not in GraphQL schema; stretch goal.
+- **R8 optimistic accept** — stretch goal.
+- **Outgoing requests UI** — API query exists; mobile shows incoming only (enough for demo).
+- **Tier-specific error text** — failures say "Your tier is full." without naming the tier or counts; functional for R6 but could be clearer.
+- **GraphQL / resolver tests** — covered by store integration tests instead.
 
-This is a deal breaker, not a preference. A submission without a transcript does
-not get read, does not get a call, and does not get feedback, no matter how good
-the code is. If you are unsure whether what you have counts, send it and ask.
+## Where the agent got it wrong
 
-We are not checking whether you used an agent. We assume you did. We are reading
-*how*: what you asked for, what came back wrong, where you stopped and thought,
-what you threw away. That is the part of your work the finished code hides.
+The agent initially wrote `TestOverBudgetIsHandled` with a move to Pink when Pink was already at 2/1, expecting the move to succeed. The implementation correctly returned `ErrTierFull`. The test scenario was wrong, not the code — caught when `go test` failed and the destination tier state was traced.
 
-- Put the files in `transcripts/` at the repo root. Raw text or markdown is fine.
-- Every tool has an export. Claude Code: `/export`, or the session files under
-  `~/.claude/projects/`. Cursor and Copilot: export the chat. ChatGPT and Claude
-  web: share link plus a pasted copy, because links rot.
-- Do not tidy it. Dead ends, bad prompts and reversals are the signal. A polished
-  transcript reads as a rewritten one.
-- Redact secrets and anything not yours. Nothing else.
-- Worked without an agent for part or all of it? Say that in the README and skip
-  the file for that part. Silence is what fails, not abstinence.
+## Agent transcript
 
-## The call — 45 minutes
+Full Cursor agent session for this exercise:
 
-We read your transcript before this call, and some of the 20 minutes comes
-straight out of it. No transcript in the repo, no call.
+- [transcripts/cursor-session.jsonl](transcripts/cursor-session.jsonl)
 
-- **10 min** — you demo it, including one refusal.
-- **20 min** — two features in depth. Why this shape, what you rejected, where it
-  breaks first.
-- **15 min** — one live change to your own code, on the call, with your normal tools.
-
-Graded on: the four rules holding (proven by a test), the rule living in one
-pure testable place, refusals reaching the user as a sentence, cutting the right
-scope and saying so, how you drove the agent, and — outweighing the rest —
-being able to change and explain your own code live.
-
-Questions before you start are free. Ambiguity you resolved and wrote down beats
-a question you didn't ask.
-
-## Before you send it
-
-- [ ] `make check` is green on a fresh clone.
-- [ ] Tests prove the four rules.
-- [ ] README has Decisions, what's unfinished, and where the agent got it wrong.
-- [ ] **`transcripts/` exists, has your real sessions in it, and your README
-      links to it.** Check this one last. It is the one we get missing every time.
+(Raw JSONL export from Cursor — includes analysis, implementation, and review turns.)
