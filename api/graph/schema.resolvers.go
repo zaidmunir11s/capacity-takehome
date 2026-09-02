@@ -10,33 +10,98 @@ import (
 	"fmt"
 
 	"github.com/tktaofik/capacity-takehome/api/graph/model"
+	"github.com/tktaofik/capacity-takehome/api/internal/capacity"
 	"github.com/tktaofik/capacity-takehome/api/internal/store"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // SendRequest is the resolver for the sendRequest field.
 func (r *mutationResolver) SendRequest(ctx context.Context, toUserID string, tier model.Tier) (*model.Request, error) {
-	panic(fmt.Errorf("not implemented: SendRequest - sendRequest"))
+	callerID, err := store.CallerID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	toID, err := parseObjectID(toUserID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid toUserId")
+	}
+
+	req, err := r.Store.SendRequest(ctx, r.Caps, callerID, toID, toCapacityTier(tier))
+	if err != nil {
+		return nil, mapCapacityError(err, callerID)
+	}
+	return r.requestToModel(ctx, req)
 }
 
 // AcceptRequest is the resolver for the acceptRequest field.
 func (r *mutationResolver) AcceptRequest(ctx context.Context, requestID string) (*model.Contact, error) {
-	panic(fmt.Errorf("not implemented: AcceptRequest - acceptRequest"))
+	callerID, err := store.CallerID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rid, err := parseObjectID(requestID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid requestId")
+	}
+
+	contact, err := r.Store.AcceptRequest(ctx, r.Caps, callerID, rid)
+	if err != nil {
+		return nil, mapCapacityError(err, callerID)
+	}
+	return r.contactToModel(ctx, contact)
 }
 
 // DeclineRequest is the resolver for the declineRequest field.
 func (r *mutationResolver) DeclineRequest(ctx context.Context, requestID string) (*model.Request, error) {
-	panic(fmt.Errorf("not implemented: DeclineRequest - declineRequest"))
+	callerID, err := store.CallerID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rid, err := parseObjectID(requestID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid requestId")
+	}
+
+	req, err := r.Store.DeclineRequest(ctx, callerID, rid)
+	if err != nil {
+		return nil, err
+	}
+	return r.requestToModel(ctx, req)
 }
 
 // MoveContact is the resolver for the moveContact field.
 func (r *mutationResolver) MoveContact(ctx context.Context, contactID string, tier model.Tier) (*model.Contact, error) {
-	panic(fmt.Errorf("not implemented: MoveContact - moveContact"))
+	callerID, err := store.CallerID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cid, err := parseObjectID(contactID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid contactId")
+	}
+
+	contact, err := r.Store.MoveContact(ctx, r.Caps, callerID, cid, toCapacityTier(tier))
+	if err != nil {
+		return nil, mapCapacityError(err, callerID)
+	}
+	return r.contactToModel(ctx, contact)
 }
 
 // RemoveContact is the resolver for the removeContact field.
 func (r *mutationResolver) RemoveContact(ctx context.Context, contactID string) (bool, error) {
-	panic(fmt.Errorf("not implemented: RemoveContact - removeContact"))
+	callerID, err := store.CallerID(ctx)
+	if err != nil {
+		return false, err
+	}
+	cid, err := parseObjectID(contactID)
+	if err != nil {
+		return false, fmt.Errorf("invalid contactId")
+	}
+
+	if err := r.Store.RemoveContact(ctx, callerID, cid); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Me is the resolver for the me field.
@@ -72,22 +137,90 @@ func (r *queryResolver) Users(ctx context.Context) ([]model.User, error) {
 
 // Contacts is the resolver for the contacts field.
 func (r *queryResolver) Contacts(ctx context.Context) ([]model.Contact, error) {
-	panic(fmt.Errorf("not implemented: Contacts - contacts"))
+	callerID, err := store.CallerID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	docs, err := r.Store.ContactsFor(ctx, callerID)
+	if err != nil {
+		return nil, fmt.Errorf("contacts: %w", err)
+	}
+	out := make([]model.Contact, 0, len(docs))
+	for i := range docs {
+		c, err := r.contactToModel(ctx, &docs[i])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *c)
+	}
+	return out, nil
 }
 
 // Capacity is the resolver for the capacity field.
 func (r *queryResolver) Capacity(ctx context.Context) (*model.Capacity, error) {
-	panic(fmt.Errorf("not implemented: Capacity - capacity"))
+	callerID, err := store.CallerID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	counts, err := r.Store.CountsFor(ctx, callerID)
+	if err != nil {
+		return nil, fmt.Errorf("capacity: %w", err)
+	}
+	tiers := make([]model.TierCapacity, 0, len(capacity.Tiers()))
+	for _, t := range capacity.Tiers() {
+		tiers = append(tiers, model.TierCapacity{
+			Tier: toModelTier(t),
+			Used: counts[t],
+			Cap:  r.Caps.PerTier[t],
+		})
+	}
+	return &model.Capacity{
+		BudgetUsed: counts.Total(),
+		BudgetCap:  r.Caps.Budget,
+		Tiers:      tiers,
+	}, nil
 }
 
 // IncomingRequests is the resolver for the incomingRequests field.
 func (r *queryResolver) IncomingRequests(ctx context.Context) ([]model.Request, error) {
-	panic(fmt.Errorf("not implemented: IncomingRequests - incomingRequests"))
+	callerID, err := store.CallerID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	docs, err := r.Store.IncomingRequestsFor(ctx, callerID)
+	if err != nil {
+		return nil, fmt.Errorf("incomingRequests: %w", err)
+	}
+	out := make([]model.Request, 0, len(docs))
+	for i := range docs {
+		req, err := r.requestToModel(ctx, &docs[i])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *req)
+	}
+	return out, nil
 }
 
 // OutgoingRequests is the resolver for the outgoingRequests field.
 func (r *queryResolver) OutgoingRequests(ctx context.Context) ([]model.Request, error) {
-	panic(fmt.Errorf("not implemented: OutgoingRequests - outgoingRequests"))
+	callerID, err := store.CallerID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	docs, err := r.Store.OutgoingRequestsFor(ctx, callerID)
+	if err != nil {
+		return nil, fmt.Errorf("outgoingRequests: %w", err)
+	}
+	out := make([]model.Request, 0, len(docs))
+	for i := range docs {
+		req, err := r.requestToModel(ctx, &docs[i])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *req)
+	}
+	return out, nil
 }
 
 // Mutation returns MutationResolver implementation.

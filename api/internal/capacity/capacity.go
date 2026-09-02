@@ -45,24 +45,37 @@ var (
 	ErrBudgetFull = errors.New("capacity: shared budget is full")
 	// ErrTierFull means the destination tier is full, even though the budget has room.
 	ErrTierFull = errors.New("capacity: tier is full")
-
-	errNotImplemented = errors.New("capacity: not implemented")
 )
 
 // CanSend reports whether a user holding these counts may send a new request.
 // A pending request creates no contact and spends no seat.
 func CanSend(caps Caps, have Counts) error {
-	return errNotImplemented
+	if have.Total() >= caps.Budget {
+		return ErrBudgetFull
+	}
+	return nil
 }
 
 // CanAdd reports whether a new contact may be added to tier t.
 // Called for both sides of an accept.
 func CanAdd(caps Caps, have Counts, t Tier) error {
-	return errNotImplemented
+	if have.Total() >= caps.Budget {
+		return ErrBudgetFull
+	}
+	if have[t] >= caps.PerTier[t] {
+		return ErrTierFull
+	}
+	return nil
 }
 
 // CanMove reports whether an existing contact may be re-filed from one tier
 // to another. The contact already occupies a seat.
 func CanMove(caps Caps, have Counts, from, to Tier) error {
-	return errNotImplemented
+	if from == to {
+		return nil
+	}
+	if have[to] >= caps.PerTier[to] {
+		return ErrTierFull
+	}
+	return nil
 }
